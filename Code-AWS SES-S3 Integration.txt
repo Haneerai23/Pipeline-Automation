@@ -1,0 +1,195 @@
+Step 1: - Setup Notification in courier
+
+Step 2: - we'll use the Courier Node.js SDK to send it. We'll start by creating a new npm project.
+
+ npm-commands:  -> mkdir courier-send && cd courier-send
+                -> npm init --yes
+    
+Step 3: -  Now we can add a couple packages that will assist us in calling the Courier API. We'll install the Courier Node.js package and since we'll be using environment variables, we'll go ahead and install the dotenv package.
+
+                -> npm install @trycourier/courier dotenv
+                
+Step 4: - To handle authentication with the Courier API, we'll store our Courier Auth Token in the environment variable COURIER_AUTH_TOKEN using a .env file. Be sure not to check this file into source control. You can find your Courier Auth Token in Settings > API Keys in your Courier account. Let's create the .env file and populate it with your auth token.
+
+                -> echo "COURIER_AUTH_TOKEN=YOUR_AUTH_TOKEN" > .env
+                
+Step 5: - Now we can create an index file in VSCode on Eclipse or Intelliej
+
+                -> touch index.js && code .
+                
+                
+       Config:- require("dotenv").config();
+                
+                const { CourierClient } = require("@trycourier/courier");
+
+                const courier = CourierClient();
+
+                const main = async () => {
+
+                };
+
+                main();
+                
+                
+Step 6: - This code will load the environment variables from our .env file and create a Courier client using our auth token. It also sets up an async main function so we can use async/wait. Now let's add the Courier send call. In the main function, add the following code:
+
+
+      Config:-  const { messageId } = await courier.send({
+                eventId: "JBP08RT52PM35CNAJNM2GFCB9HHW",
+                recipientId: "Haneerai101074",
+                profile: {
+                    email: "haneerai123@gmail.com"
+               }
+               data: {
+                    name: "HaneeRai"
+               }
+               });
+               console.log("Sent notification: ", messageId); 
+       
+       
+Step 7: - To add the attachment, we'll need to first retrieve it from our S3 Bucket and convert it to a base64 string. Then we'll be able to add it to the send call above using a provider override. Each provider has its own override configuration and you can see them all in the Courier Integration Guides. We'll be using the attachment override for the AWS SES integration.
+
+     adding the AWS SES SDK:
+     
+     
+   Command:-  -> npm install @aws-sdk/client-s3
+   
+   
+Step 8: - Next we'll configure the environment variables needed for authentication. For this you'll need to get your AWS credentials. They consist of an access key ID and a secret access key. Make sure the IAM user you’re using has at least S3 Read Access.
+
+    Open your .env file and add the following lines and replace the values with your credentials.
+    
+    
+    AWS_ACCESS_KEY_ID=YOUR_ACCESS_KEY_ID
+    AWS_SECRET_ACCESS_KEY=YOUR_SECRET_ACCESS_KEY
+    
+    
+Step 9:-  Now go back to the index.js and add the following lines above the main function:
+
+    const S3 = require("@aws-sdk/client-s3");
+    const s3Client = new S3.S3Client({
+    region: "us-east-1"
+    });
+    
+Step 10:- This code will create an S3 Client using your credentials stored in the .env file. If you aren't using us-east-1, you should change it to your region. Now we can create the command to get an object from your S3 bucket and have the client execute it.
+
+    Add the following code to the beginning of the main function:
+    
+    
+    const command = new S3.GetObjectCommand({
+    Bucket: "courier-test-ajh",
+    Key: "test-pdf.pdf"
+    });
+    const data = await s3Client.send(command);
+    
+Step 11:- Update the values of Bucket and Key to match your bucket id and the key of the file you'd like to attach. The data contains all we need to attach the file, but we'll have to convert the Body from a readable stream to a buffer so we can get it as a base64 string. We'll use a helper function to convert it.
+Add the following function above the main function:
+
+
+    function streamToBuffer(stream) {
+    return new Promise((resolve, reject) => {
+    let buffers = [];
+    stream.on("error", reject);
+    stream.on("data", (data) => buffers.push(data));
+    stream.on("end", () => resolve(Buffer.concat(buffers)));
+    });
+    }
+    
+ Step 12:- Now we can use it right after data in the main function:
+ 
+    const command = new S3.GetObjectCommand({
+    Bucket: "courier-test-ajh",
+    Key: "invoice.pdf"
+    });
+    const data = await s3Client.send(command);
+    const buff = await streamToBuffer(data.Body);
+    
+ Step 13:- we'll use all this to create an attachment object right below it.
+    
+    const attachment = {
+    filename: "invoice.pdf",
+    contentType: data.ContentType,
+    data: buff.toString("base64")
+    };
+    
+ Step 14:- Now let's update our & send call to use the override:
+ 
+   const { messageId } = await courier.send({
+   eventId: "JBP08RT52PM35CNAJNM2GFCB9HHW", (Event ID generated Via Salting process)
+   recipientId: "Haneerai101074",
+   data: {
+    name: "Haneerai"
+   },
+   override: {
+    "aws-ses": {
+      attachments: [attachment]
+    }
+   }
+   });
+   
+   
+  Final Step 15:- Now if we will run the code again it should pull the specified file from S3, attach it to your email, and send it to us.
+  
+  
+  Final Code:- 
+  
+  
+          require("dotenv").config();
+          const S3 = require("@aws-sdk/client-s3");
+          const { CourierClient } = require("@trycourier/courier");
+
+          const s3Client = new S3.S3Client({
+          region: "us-east-1"
+          });
+          const courier = CourierClient();
+
+          // Helper function that takes a stream and returns a buffer
+
+          function streamToBuffer(stream) {
+          return new Promise((resolve, reject) => {
+          let buffers = [];
+          stream.on("error", reject);
+          stream.on("data", (data) => buffers.push(data));
+          stream.on("end", () => resolve(Buffer.concat(buffers)));
+          });
+         }
+
+          const main = async () => {
+          // Retrieve the file from an S3 Bucket
+          const command = new S3.GetObjectCommand({
+          Bucket: "courier-test-ajh",
+          Key: "invoice.pdf"
+          });
+         const data = await s3Client.send(command);
+       
+       // Convert the readable stream to a buffer
+       const buff = await streamToBuffer(data.Body);
+
+       // Create an attachment object to provide the override
+       const attachment = {
+       filename: "invoice.pdf",
+       contentType: data.ContentType,
+       data: buff.toString("base64")
+       };
+
+       const { messageId } = await courier.send({
+       eventId: "JBP08RT52PM35CNAJNM2GFCB9HHW",
+       recipientId: "Haneerai101074",
+       data: {
+         name: "Haneerai"
+        },
+       override: {
+         "aws-ses": {
+         attachments: [attachment]
+       }
+     }
+   });
+    console.log("Sent notification: ", messageId);
+  };
+
+     main();
+    
+
+
+    
+ 
